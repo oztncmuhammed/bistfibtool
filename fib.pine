@@ -1,0 +1,106 @@
+//@version=6
+
+indicator("BİST Fibonacci Analiz Aracı", "Fibonacci Analiz", overlay=true)
+
+// ----- GİRDİLER -----
+// Fibonacci Geri Çekilme Ayarları
+fib_color_retracement = input.color(color.blue, "Çizgi Rengi", group="Geri Çekilme Ayarları")
+fib_line_thickness = input.int(1, "Çizgi Kalınlığı", minval=1, maxval=5, group="Geri Çekilme Ayarları")
+fib_line_style = input.string("Kesikli", "Çizgi Türü", options=["Tam", "Kesikli", "Noktalı"], group="Geri Çekilme Ayarları")
+lookback_period = input.int(15, "Bakış Periyodu (Bar)", minval=5, maxval=50, group="Geri Çekilme Ayarları")
+
+// Her Fibonacci seviyesi için ayrı input
+fib_level_0 = input.float(0.0, "Fibonacci Seviye 1", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_1 = input.float(0.214, "Fibonacci Seviye 2", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_2 = input.float(0.34, "Fibonacci Seviye 3", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_3 = input.float(0.382, "Fibonacci Seviye 4", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_4 = input.float(0.5, "Fibonacci Seviye 5", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_5 = input.float(0.618, "Fibonacci Seviye 6", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_6 = input.float(0.66, "Fibonacci Seviye 7", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_7 = input.float(0.786, "Fibonacci Seviye 8", step=0.001, group="Fibonacci Seviyeleri")
+fib_level_8 = input.float(1.0, "Fibonacci Seviye 9", step=0.001, group="Fibonacci Seviyeleri")
+
+// Manuel seviye seçimi
+manual_mode = input.bool(false, "Manuel Seviye Seçimi", group="Manuel Ayarlar")
+start_price = input.float(0, "Başlangıç Fiyatı", group="Manuel Ayarlar")
+end_price = input.float(0, "Bitiş Fiyatı", group="Manuel Ayarlar")
+
+// ----- FİBONACCI HESAPLAMA FONKSİYONLARI -----
+
+// Fibonacci seviyelerini hesapla - input'lardan alınan seviyelere göre
+calculate_fib_levels(high_price, low_price) =>
+    diff = high_price - low_price
+    levels = array.new<float>()
+    // Input'lardan alınan seviyeler
+    array.push(levels, high_price - diff * fib_level_0)      // Seviye 1
+    array.push(levels, high_price - diff * fib_level_1)      // Seviye 2
+    array.push(levels, high_price - diff * fib_level_2)      // Seviye 3
+    array.push(levels, high_price - diff * fib_level_3)      // Seviye 4
+    array.push(levels, high_price - diff * fib_level_4)      // Seviye 5
+    array.push(levels, high_price - diff * fib_level_5)      // Seviye 6
+    array.push(levels, high_price - diff * fib_level_6)      // Seviye 7
+    array.push(levels, high_price - diff * fib_level_7)      // Seviye 8
+    array.push(levels, high_price - diff * fib_level_8)      // Seviye 9
+    levels
+
+// Yüzdelik çekilme hesaplama
+calculate_retracement_percentage(current_price, high_price, low_price) =>
+    if high_price != low_price
+        retracement = (high_price - current_price) / (high_price - low_price) * 100
+        retracement
+    else
+        na
+
+// ----- ANA MANTIK -----
+
+// Değişkenleri tanımla
+var float fib_high = na
+var float fib_low = na
+var int fib_high_bar = na
+var int fib_low_bar = na
+
+// Manuel mod kontrolü
+if manual_mode and start_price > 0 and end_price > 0
+    fib_high := math.max(start_price, end_price)
+    fib_low := math.min(start_price, end_price)
+    fib_high_bar := bar_index - 10
+    fib_low_bar := bar_index
+else
+    // Otomatik mod - son 15 bar içindeki en yüksek/düşük
+    fib_high := ta.highest(high, lookback_period)
+    fib_low := ta.lowest(low, lookback_period)
+    fib_high_bar := bar_index - lookback_period
+    fib_low_bar := bar_index - lookback_period
+
+// Fibonacci seviyelerini çiz - sadece son barda
+if barstate.islast and not na(fib_high) and not na(fib_low) and fib_high != fib_low
+    fib_levels = calculate_fib_levels(fib_high, fib_low)
+    
+    // Çizgi türünü belirle
+    line_style = line.style_solid
+    if fib_line_style == "Kesikli"
+        line_style := line.style_dashed
+    else if fib_line_style == "Noktalı"
+        line_style := line.style_dotted
+    
+    // Fibonacci seviyelerini çiz ve seviye bilgilerini yaz
+    for i = 0 to array.size(fib_levels) - 1
+        level = array.get(fib_levels, i)
+        line.new(fib_low_bar, level, bar_index + 20, level, color=fib_color_retracement, width=fib_line_thickness, style=line_style)
+        
+        // Seviye bilgisini sağ tarafa yaz - input'lardan alınan seviyeler
+        level_text = ""
+        switch i
+            0 => level_text := str.tostring(fib_level_0)
+            1 => level_text := str.tostring(fib_level_1)
+            2 => level_text := str.tostring(fib_level_2)
+            3 => level_text := str.tostring(fib_level_3)
+            4 => level_text := str.tostring(fib_level_4)
+            5 => level_text := str.tostring(fib_level_5)
+            6 => level_text := str.tostring(fib_level_6)
+            7 => level_text := str.tostring(fib_level_7)
+            8 => level_text := str.tostring(fib_level_8)
+        
+        label.new(bar_index + 23, level, level_text, color=color.new(color.white, 100), textcolor=fib_color_retracement, size=size.small, style=label.style_none)
+    
+  

@@ -9,29 +9,26 @@ fib_line_thickness = input.int(1, "Çizgi Kalınlığı", minval=1, maxval=5, gr
 fib_line_style = input.string("Kesikli", "Çizgi Türü", options=["Tam", "Kesikli", "Noktalı"], group="Geri Çekilme Ayarları")
 lookback_period = input.int(15, "Bakış Periyodu (Bar)", minval=5, maxval=200, group="Geri Çekilme Ayarları")
 
-// Her Fibonacci seviyesi için ayrı input
-fib_level_0 = input.float(0.0, "Fibonacci Seviye 1 (0.0)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_1 = input.float(0.236, "Fibonacci Seviye 2 (0.236)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_2 = input.float(0.382, "Fibonacci Seviye 3 (0.382)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_3 = input.float(0.618, "Fibonacci Seviye 4 (0.618)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_4 = input.float(0.786, "Fibonacci Seviye 5 (0.786)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_5 = input.float(1.0, "Fibonacci Seviye 6 (1.0)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_6 = input.float(1.27, "Fibonacci Seviye 7 (1.27)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_7 = input.float(1.618, "Fibonacci Seviye 8 (1.618)", step=0.001, group="Fibonacci Seviyeleri")
-fib_level_8 = input.float(0.0, "Fibonacci Seviye 9 (Kullanılmıyor)", step=0.001, group="Fibonacci Seviyeleri")
-
-// Manuel seviye seçimi
-manual_mode = input.bool(false, "Manuel Seviye Seçimi", group="Manuel Ayarlar")
-start_price = input.float(0, "Başlangıç Fiyatı", group="Manuel Ayarlar")
-end_price = input.float(0, "Bitiş Fiyatı", group="Manuel Ayarlar")
-
 // İkinci Fibonacci Ayarları
 fib2_color = input.color(color.orange, "İkinci Fib Çizgi Rengi", group="İkinci Fibonacci Ayarları")
 fib2_label_size = input.string("Küçük", "Seviye Punto Boyutu", options=["Çok Küçük", "Küçük", "Normal", "Büyük"], group="İkinci Fibonacci Ayarları")
 
+// Fibonacci seviyeleri (sabit değerler - kullanıcı değiştiremez)
+fib_level_0 = 0.0
+fib_level_1 = 0.236
+fib_level_2 = 0.382
+fib_level_3 = 0.618
+fib_level_4 = 0.786
+fib_level_5 = 1.0
+fib_level_6 = 1.27
+fib_level_7 = 1.618
+
 // Görüntüleme Ayarları
 show_fib1 = input.bool(true, "İlk Fibonacci Göster", group="Görüntüleme Ayarları")
 show_fib2 = input.bool(true, "İkinci Fibonacci Göster", group="Görüntüleme Ayarları")
+show_q_label = input.bool(true, "Q Etiketi Göster", group="Görüntüleme Ayarları")
+show_p_label = input.bool(true, "P Etiketi Göster", group="Görüntüleme Ayarları")
+show_l_label = input.bool(true, "L (Long) Etiketi Göster", group="Görüntüleme Ayarları")
 
 // ----- FİBONACCI HESAPLAMA FONKSİYONLARI -----
 
@@ -127,39 +124,33 @@ get_label_size(size_option) =>
         "Büyük" => size.large
         => size.small
 
-// Manuel mod kontrolü
-if manual_mode and start_price > 0 and end_price > 0
-    fib_high := math.max(start_price, end_price)
-    fib_low := math.min(start_price, end_price)
-    fib_high_bar := bar_index - 10
-    fib_low_bar := bar_index
+// İlk fib için en düşük ve en yüksek nokta tespiti
+// Son 15 gün içindeki en düşük ve en yüksek bul
+fib_low := low[0]    // En düşük için başlangıç
+fib_low_bar := bar_index
+
+// Tüm high değerlerini topla ve sırala
+highs = array.new<float>()
+high_bars = array.new<int>()
+
+for i = 0 to lookback_period - 1
+    array.push(highs, high[i])
+    array.push(high_bars, bar_index - i)
+    if low[i] < fib_low
+        fib_low := low[i]
+        fib_low_bar := bar_index - i
+
+// High değerlerini büyükten küçüğe sırala
+array.sort(highs, order.descending)
+array.sort(high_bars, order.descending)
+
+// Birinci en yüksek noktayı al
+if array.size(highs) >= 1
+    fib_high := array.get(highs, 0)  // Birinci en yüksek
+    fib_high_bar := array.get(high_bars, 0)
 else
-    // Son 15 gün içindeki en düşük ve ikinci en yüksek bul
-    fib_low := low[0]    // En düşük için başlangıç
-    fib_low_bar := bar_index
-    
-    // Tüm high değerlerini topla ve sırala
-    highs = array.new<float>()
-    high_bars = array.new<int>()
-    
-    for i = 0 to lookback_period - 1
-        array.push(highs, high[i])
-        array.push(high_bars, bar_index - i)
-        if low[i] < fib_low
-            fib_low := low[i]
-            fib_low_bar := bar_index - i
-    
-    // High değerlerini büyükten küçüğe sırala
-    array.sort(highs, order.descending)
-    array.sort(high_bars, order.descending)
-    
-    // Birinci en yüksek noktayı al
-    if array.size(highs) >= 1
-        fib_high := array.get(highs, 0)  // Birinci en yüksek
-        fib_high_bar := array.get(high_bars, 0)
-    else
-        fib_high := na
-        fib_high_bar := na
+    fib_high := na
+    fib_high_bar := na
 
 // P-Q analizi için ana mantık - sadece son barda çalışır
 if barstate.islast and not na(fib_high) and not na(fib_low) and fib_high != fib_low

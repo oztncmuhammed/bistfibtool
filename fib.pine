@@ -272,8 +272,9 @@ if barstate.islast and not na(fib_high) and not na(fib_low) and fib_high != fib_
             // P mumunun high değerini al
             p_high = high[bar_index - p_bar]
             
-            // P'den SONRA gelen mumlarda tara
-            for i = 0 to max_search_bars - 1
+            // P'den SONRA gelen mumlarda tara - TERSTEN ARAMA
+            int max_l_search_bars = math.min(lookback_period * 2, 200)
+            for i = max_l_search_bars - 1 to 0
                 if i < bar_index
                     current_bar = bar_index - i
                     current_close = close[i]

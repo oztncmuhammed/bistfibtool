@@ -1,0 +1,365 @@
+//@version=6
+
+indicator("BİST Fibonacci  Aracı", "Fibonacci Analiz", overlay=true)
+
+// ----- GİRDİLER -----
+// Fibonacci Geri Çekilme Ayarları
+fib_color_retracement = input.color(color.blue, "Çizgi Rengi", group="Geri Çekilme Ayarları")
+fib_line_thickness = input.int(1, "Çizgi Kalınlığı", minval=1, maxval=5, group="Geri Çekilme Ayarları")
+fib_line_style = input.string("Kesikli", "Çizgi Türü", options=["Tam", "Kesikli", "Noktalı"], group="Geri Çekilme Ayarları")
+lookback_period = input.int(15, "Bakış Periyodu (Bar)", minval=5, maxval=200, group="Geri Çekilme Ayarları")
+
+// İkinci Fibonacci Ayarları
+fib2_color = input.color(color.orange, "İkinci Fib Çizgi Rengi", group="İkinci Fibonacci Ayarları")
+fib2_label_size = input.string("Küçük", "Seviye Punto Boyutu", options=["Çok Küçük", "Küçük", "Normal", "Büyük"], group="İkinci Fibonacci Ayarları")
+
+// Fibonacci seviyeleri (sabit değerler - kullanıcı değiştiremez)
+fib_level_0 = 0.0
+fib_level_1 = 0.236
+fib_level_2 = 0.382
+fib_level_3 = 0.618
+fib_level_4 = 0.786
+fib_level_5 = 1.0
+fib_level_6 = 1.27
+fib_level_7 = 1.618
+
+// Görüntüleme Ayarları
+show_fib1 = input.bool(true, "İlk Fibonacci Göster", group="Görüntüleme Ayarları")
+show_fib2 = input.bool(true, "İkinci Fibonacci Göster", group="Görüntüleme Ayarları")
+show_q_label = input.bool(true, "Q Etiketi Göster", group="Görüntüleme Ayarları")
+show_p_label = input.bool(true, "P Etiketi Göster", group="Görüntüleme Ayarları")
+show_l_label = input.bool(true, "L (Long) Etiketi Göster", group="Görüntüleme Ayarları")
+
+// ----- FİBONACCI HESAPLAMA FONKSİYONLARI -----
+
+// Fibonacci seviyelerini hesapla - input'lardan alınan seviyelere göre
+calculate_fib_levels(high_price, low_price) =>
+    diff = high_price - low_price
+    levels = array.new<float>()
+    // Input'lardan alınan seviyeler - dipten yukarıya doğru
+    // Seviyeler: 0, 0.236, 0.382, 0.618, 0.786, 1.0, 1.27, 1.618
+    array.push(levels, low_price)                             // 0.0 seviyesi (fib_level_0)
+    array.push(levels, low_price + diff * fib_level_1)         // 0.236 seviyesi
+    array.push(levels, low_price + diff * fib_level_2)         // 0.382 seviyesi
+    array.push(levels, low_price + diff * fib_level_3)        // 0.618 seviyesi
+    array.push(levels, low_price + diff * fib_level_4)        // 0.786 seviyesi
+    array.push(levels, high_price)                            // 1.0 seviyesi (fib_level_5)
+    array.push(levels, low_price + diff * fib_level_6)        // 1.27 seviyesi
+    array.push(levels, low_price + diff * fib_level_7)        // 1.618 seviyesi
+    levels
+
+// Fibonacci seviyelerini hesapla - TERS YÖN (yukarıdan aşağıya)
+calculate_fib_levels_reverse(high_price, low_price) =>
+    diff = high_price - low_price
+    levels = array.new<float>()
+    // Ters yön: tepeden aşağıya doğru
+    // Seviyeler: 0.0 (tepe), 0.236, 0.382, 0.618, 0.786, 1.0 (dip)
+    array.push(levels, high_price)                            // 0.0 seviyesi (tepe)
+    array.push(levels, high_price - diff * fib_level_1)        // 0.236 seviyesi
+    array.push(levels, high_price - diff * fib_level_2)      // 0.382 seviyesi
+    array.push(levels, high_price - diff * fib_level_3)        // 0.618 seviyesi
+    array.push(levels, high_price - diff * fib_level_4)        // 0.786 seviyesi
+    array.push(levels, low_price)                             // 1.0 seviyesi (dip)
+    // 1.27 ve 1.618 seviyeleri ters yönde anlamlı değil, sadece dip olarak ekle
+    array.push(levels, low_price)                             // 1.27 seviyesi yerine dip
+    array.push(levels, low_price)                             // 1.618 seviyesi yerine dip
+    levels
+
+// Yüzdelik çekilme hesaplama
+calculate_retracement_percentage(current_price, high_price, low_price) =>
+    if high_price != low_price
+        retracement = (high_price - current_price) / (high_price - low_price) * 100
+        retracement
+    else
+        na
+
+// ----- ANA MANTIK -----
+
+// Değişkenleri tanımla
+var fib_high = float(na)
+var fib_low = float(na)
+var fib_high_bar = int(na)
+var fib_low_bar = int(na)
+
+// P-Q Analizi için değişkenler
+var p_detected = false
+var q_detected = false
+var strategy_cancelled = false
+var long_signal_shown = false
+var p_bar = int(na)
+var q_bar = int(na)
+var p_price = float(na)
+var q_price = float(na)
+
+// İkinci fib için değişkenler
+var fib2_high = float(na)  // Q'nun fiyatı (tepe)
+var fib2_low = float(na)   // Q'dan sonraki dip
+var fib2_high_bar = int(na)
+var fib2_low_bar = int(na)
+
+// Seviyeler
+var fib1_618_level = float(na)
+var fib1_100_level = float(na)
+var fib2_0_level = float(na)
+var fib2_618_level = float(na)
+var fib2_100_level = float(na)
+
+// Belirli bir seviyeye temas tespiti fonksiyonu
+is_touching_level(price, level) =>
+    if not na(level)
+        math.abs(price - level) <= (level * 0.005) // %0.5 tolerans
+    else
+        false
+
+// Bir seviyenin belirli bir aralıkta olup olmadığını kontrol et
+is_in_range(level, min_level, max_level) =>
+    not na(level) and not na(min_level) and not na(max_level) and level >= min_level and level <= max_level
+
+// Label boyutu belirleme fonksiyonu
+get_label_size(size_option) =>
+    switch size_option
+        "Çok Küçük" => size.tiny
+        "Küçük" => size.small
+        "Normal" => size.normal
+        "Büyük" => size.large
+        => size.small
+
+// İlk fib için en düşük ve en yüksek nokta tespiti
+// Son 15 gün içindeki en düşük ve en yüksek bul
+fib_low := low[0]    // En düşük için başlangıç
+fib_low_bar := bar_index
+
+// Tüm high değerlerini topla ve sırala
+highs = array.new<float>()
+high_bars = array.new<int>()
+
+for i = 0 to lookback_period - 1
+    array.push(highs, high[i])
+    array.push(high_bars, bar_index - i)
+    if low[i] < fib_low
+        fib_low := low[i]
+        fib_low_bar := bar_index - i
+
+// High değerlerini büyükten küçüğe sırala
+array.sort(highs, order.descending)
+array.sort(high_bars, order.descending)
+
+// Birinci en yüksek noktayı al
+if array.size(highs) >= 1
+    fib_high := array.get(highs, 0)  // Birinci en yüksek
+    fib_high_bar := array.get(high_bars, 0)
+else
+    fib_high := na
+    fib_high_bar := na
+
+// P-Q analizi için ana mantık - sadece son barda çalışır
+if barstate.islast and not na(fib_high) and not na(fib_low) and fib_high != fib_low
+    diff = fib_high - fib_low
+    
+    // İlk fib seviyelerini hesapla
+    fib1_618_level := fib_low + diff * fib_level_3  // 0.618 seviyesi
+    fib1_100_level := fib_high                       // 1.0 seviyesi
+    
+    fib_low_bar_index = fib_low_bar
+    
+    // 1. ADIM: Q tespiti - İlk fib'de 0.618'i geçen İLK TEPE'yi bul (TERSTEN ARAMA)
+    if not q_detected
+        max_search_bars = math.min(lookback_period * 2, 200)
+        float q_first_peak_price = -1.0
+        int q_first_peak_bar = int(na)
+        bool found_q = false
+        
+        // TERSTEN ARAMA: En eskiden en yeniye doğru (zaman sırasında)
+        for i = max_search_bars - 1 to 0
+            if i < bar_index
+                current_bar = bar_index - i
+                current_close = close[i]
+                current_high = high[i]
+                current_low = low[i]
+                
+                // Low'dan sonra olmalı
+                if current_bar > fib_low_bar_index
+                    // 0.618'i geçti mi ve daha önce Q bulmadıysak
+                    if not found_q and current_high >= fib1_618_level
+                        // Bu mumun içinde yükseliş var mı kontrol et (high 0.618'in üstünde)
+                        // Ve sonraki mumlarda bu tepe'nin devam edip etmediğine bak
+                        // Ama şimdilik ilk bulduğumuz tepe'yi al
+                        if current_high >= fib1_618_level and current_high <= fib1_100_level
+                            found_q := true
+                            q_first_peak_price := current_high
+                            q_first_peak_bar := current_bar
+                            break
+        
+        // Eğer bir Q bulunduysa kaydet
+        if found_q and q_first_peak_price > 0
+            q_detected := true
+            q_bar := q_first_peak_bar
+            q_price := q_first_peak_price
+            // Q mumunun high'ı ikinci fib'in tepe noktası
+            q_bar_offset = bar_index - q_bar
+            fib2_high := high[q_bar_offset]  // Q mumunun yüksek iğnesi
+            fib2_high_bar := q_bar
+    
+    // 2. ADIM: Q'dan SONRA dip tespiti - İkinci fib'in 0 noktası
+    if q_detected and not na(fib2_high) and not strategy_cancelled and na(fib2_low)
+        max_search_bars = math.min(lookback_period * 2, 200)
+        float lowest_price = 999999.0
+        int lowest_bar = int(na)
+        
+        // Q'dan SONRA (zaman sırasında Q'dan sonra gelen barlar)
+        // Loop geçmişten geleceğe gidiyor (i artıyor, current_bar azalıyor)
+        for i = 0 to max_search_bars - 1
+            if i < bar_index
+                current_bar = bar_index - i
+                current_low = low[i]
+                
+                // Q'dan SONRA (current_bar > q_bar demek Q'dan sonraki barlar)
+                if current_bar > q_bar
+                    if current_low < lowest_price
+                        lowest_price := current_low
+                        lowest_bar := current_bar
+        
+        // Strateji iptal kontrolü: Eğer dip, ilk fib'in 0 noktasının (fib_low) altına inerse
+        if not na(lowest_price) and lowest_price < fib_low
+            strategy_cancelled := true
+            fib2_low := na
+            fib2_low_bar := int(na)
+        else if not na(lowest_price) and not na(lowest_bar)
+            // Dip fib_low'un üstünde, ikinci fib çizilebilir
+            fib2_low := lowest_price
+            fib2_low_bar := lowest_bar
+    
+    // 3. ADIM: İkinci fib seviyelerini hesapla (Normal yön: dipten yukarıya)
+    if not na(fib2_high) and not na(fib2_low) and fib2_high != fib2_low
+        fib2_diff = fib2_high - fib2_low
+        fib2_618_level := fib2_low + fib2_diff * fib_level_3  // 0.618 seviyesi (dipten yukarıya)
+        fib2_100_level := fib2_high                            // 1.0 seviyesi (Q - tepe)
+        fib2_0_level := fib2_low                               // 0.0 seviyesi (dip)
+        
+        // 4. ADIM: P tespiti - İkinci fib'in 1 noktasından (Q) SONRA, 0.618 ile 1.0 arasında İLK TEPE (TERSTEN ARAMA)
+        if not p_detected and q_detected
+            max_search_bars = math.min(lookback_period * 2, 200)
+            
+            // TERSTEN ARAMA: En eskiden en yeniye doğru (zaman sırasında)
+            for i = max_search_bars - 1 to 0
+                if i < bar_index
+                    current_bar = bar_index - i
+                    current_close = close[i]
+                    current_high = high[i]
+                    current_low = low[i]
+                    
+                    // Q'dan SONRA olmalı (ikinci fib'in 1 noktasından sonra)
+                    if current_bar > q_bar
+                        // 0.618 ile Q (1.0) arasında olan ilk high'ı bul
+                        if current_high >= fib2_618_level and current_high <= fib2_100_level
+                            // İlk bulduğumuz mum'u P yap
+                            p_detected := true
+                            p_bar := current_bar
+                            p_price := current_high
+                            break
+        
+        // 5. ADIM: L sinyali - P mumunun tepesi üzerinde kapanış yapan İLK mum
+        if p_detected and not long_signal_shown and not strategy_cancelled
+            // P mumunun high değerini al
+            p_high = high[bar_index - p_bar]
+            
+            // P'den SONRA gelen mumlarda tara - TERSTEN ARAMA
+            int max_l_search_bars = math.min(lookback_period * 2, 200)
+            for i = max_l_search_bars - 1 to 0
+                if i < bar_index
+                    current_bar = bar_index - i
+                    current_close = close[i]
+                    current_high = high[i]
+                    current_low = low[i]
+                    
+                    // P'den SONRA olmalı (zaman sırasında)
+                    if current_bar > p_bar
+                        // P mumunun tepesi üzerinde kapanış yapan ilk mum mu?
+                        if current_close > p_high
+                            // LONG sinyali
+                            long_signal_shown := true
+                            label.new(current_bar, current_high, "L", color=color.new(color.green, 0), textcolor=color.white, size=size.normal, style=label.style_label_down)
+                            break
+
+// Fibonacci seviyelerini çiz - sadece son barda
+if barstate.islast and not na(fib_high) and not na(fib_low) and fib_high != fib_low and show_fib1
+    fib_levels = calculate_fib_levels(fib_high, fib_low)
+    
+    // Çizgi türünü belirle
+    line_style = line.style_solid
+    if fib_line_style == "Kesikli"
+        line_style := line.style_dashed
+    else if fib_line_style == "Noktalı"
+        line_style := line.style_dotted
+    
+    // Fibonacci seviyelerini çiz ve seviye bilgilerini yaz
+    for i = 0 to array.size(fib_levels) - 1
+        level = array.get(fib_levels, i)
+        line.new(fib_low_bar, level, bar_index + 20, level, color=fib_color_retracement, width=fib_line_thickness, style=line_style)
+        
+        // Seviye bilgisini sağ tarafa yaz - input'lardan alınan seviyeler + fiyat
+        level_text = ""
+        switch i
+            0 => level_text := str.tostring(fib_level_0)      // 0.0
+            1 => level_text := str.tostring(fib_level_1)      // 0.236
+            2 => level_text := str.tostring(fib_level_2)      // 0.382
+            3 => level_text := str.tostring(fib_level_3)      // 0.618
+            4 => level_text := str.tostring(fib_level_4)      // 0.786
+            5 => level_text := str.tostring(fib_level_5)      // 1.0
+            6 => level_text := str.tostring(fib_level_6)      // 1.27
+            7 => level_text := str.tostring(fib_level_7)      // 1.618
+        
+        // Seviye + fiyat bilgisini birleştir (aralarında çizgi)
+        full_text = level_text + " | " + str.tostring(level, "#.##")
+        
+        label.new(bar_index + 24, level, full_text, color=color.new(color.white, 100), textcolor=fib_color_retracement, size=size.small, style=label.style_none)
+
+// İkinci Fibonacci seviyelerini çiz - Q'dan sonra (sadece son barda)
+if barstate.islast and not na(fib2_high) and not na(fib2_low) and fib2_high != fib2_low and show_fib2
+    fib2_levels = calculate_fib_levels(fib2_high, fib2_low)
+    
+    // Çizgi türünü belirle
+    line_style = line.style_solid
+    if fib_line_style == "Kesikli"
+        line_style := line.style_dashed
+    else if fib_line_style == "Noktalı"
+        line_style := line.style_dotted
+    
+    // Fibonacci seviyelerini çiz ve seviye bilgilerini yaz (input'tan alınan renk)
+    fib2_drawing_color = color.new(fib2_color, 30)
+    fib2_label_size_val = get_label_size(fib2_label_size)
+    
+    for i = 0 to array.size(fib2_levels) - 1
+        level = array.get(fib2_levels, i)
+        line.new(fib2_low_bar, level, bar_index + 20, level, color=fib2_drawing_color, width=fib_line_thickness, style=line_style)
+        
+        // Seviye bilgisini sağ tarafa yaz
+        level_text = ""
+        switch i
+            0 => level_text := str.tostring(fib_level_0)      // 0.0
+            1 => level_text := str.tostring(fib_level_1)      // 0.236
+            2 => level_text := str.tostring(fib_level_2)      // 0.382
+            3 => level_text := str.tostring(fib_level_3)      // 0.618
+            4 => level_text := str.tostring(fib_level_4)      // 0.786
+            5 => level_text := str.tostring(fib_level_5)      // 1.0
+            6 => level_text := str.tostring(fib_level_6)      // 1.27
+            7 => level_text := str.tostring(fib_level_7)      // 1.618
+        
+        // Seviye + fiyat bilgisini birleştir
+        full_text = level_text + " | " + str.tostring(level, "#.##")
+        
+        label.new(bar_index + 24, level, full_text, color=color.new(color.white, 100), textcolor=fib2_color, size=fib2_label_size_val, style=label.style_none)
+
+// P ve Q etiketlerini göster - sadece son barda
+if barstate.islast
+    if p_detected and not na(p_bar) and not na(p_price)
+        // P etiketini mumun üst iğnesine konumla
+        p_bar_offset = bar_index - p_bar
+        p_high = high[p_bar_offset]
+        label.new(p_bar, p_high, "P", color=color.new(color.blue, 20), textcolor=color.white, size=size.normal, style=label.style_label_down)
+    
+    if q_detected and not na(q_bar) and not na(q_price)
+        // Q etiketini mumun üst iğnesine konumla
+        q_bar_offset = bar_index - q_bar
+        q_high = high[q_bar_offset]
+        label.new(q_bar, q_high, "Q", color=color.new(color.red, 20), textcolor=color.white, size=size.normal, style=label.style_label_down)

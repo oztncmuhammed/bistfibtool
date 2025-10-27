@@ -125,32 +125,44 @@ get_label_size(size_option) =>
         => size.small
 
 // İlk fib için en düşük ve en yüksek nokta tespiti
-// Son 15 gün içindeki en düşük ve en yüksek bul
-fib_low := low[0]    // En düşük için başlangıç
-fib_low_bar := bar_index
+// ÖNCE en yüksek tepeyi bul, SONRA ondan sonraki en düşük noktayı bul
 
-// Tüm high değerlerini topla ve sırala
-highs = array.new<float>()
-high_bars = array.new<int>()
+// Bakış periyodundaki en yüksek fiyatı ve bar index'ini birlikte bul
+float max_high_price = -1.0
+int max_high_bar_index = int(na)
 
 for i = 0 to lookback_period - 1
-    array.push(highs, high[i])
-    array.push(high_bars, bar_index - i)
-    if low[i] < fib_low
-        fib_low := low[i]
-        fib_low_bar := bar_index - i
+    // En yüksek fiyatı bul (bakış periyodunda)
+    if high[i] > max_high_price
+        max_high_price := high[i]
+        max_high_bar_index := bar_index - i
 
-// High değerlerini büyükten küçüğe sırala
-array.sort(highs, order.descending)
-array.sort(high_bars, order.descending)
-
-// Birinci en yüksek noktayı al
-if array.size(highs) >= 1
-    fib_high := array.get(highs, 0)  // Birinci en yüksek
-    fib_high_bar := array.get(high_bars, 0)
+// Sonuçları kaydet
+if max_high_price > 0
+    fib_high := max_high_price
+    fib_high_bar := max_high_bar_index
 else
     fib_high := na
     fib_high_bar := na
+
+// Şimdi fib_high_bar'dan SONRA en düşük noktayı bul
+if not na(fib_high_bar)
+    fib_low := 999999.0  // En düşük için başlangıç
+    fib_low_bar := int(na)
+    
+    // fib_high_bar'dan SONRAki (zaman sırasında) barlara bak
+    for i = 0 to lookback_period - 1
+        current_bar = bar_index - i
+        // current_bar fib_high_bar'dan SONRA olmalı (zaman sırasında, yani current_bar > fib_high_bar)
+        // current_bar = bar_index - i olduğundan, i azalırken current_bar artar
+        // Yani fib_high_bar'dan SONRA olan barlar için i daha küçük olmalı
+        if current_bar > fib_high_bar
+            if low[i] < fib_low
+                fib_low := low[i]
+                fib_low_bar := current_bar
+else
+    fib_low := na
+    fib_low_bar := na
 
 // P-Q analizi için ana mantık - sadece son barda çalışır
 if barstate.islast and not na(fib_high) and not na(fib_low) and fib_high != fib_low
